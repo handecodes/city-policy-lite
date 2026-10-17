@@ -79,7 +79,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "City Policy Crash-Test" },
-      { name: "description", content: "City Policy Crash-Test" },
+      { name: "description", content: "An AI agent that stress-tests a city traffic policy in simulation before anyone builds it." },
       { name: "author", content: "Lovable" },
       { property: "og:title", content: "City Policy Crash-Test" },
       { property: "og:description", content: "City Policy Crash-Test" },
@@ -88,6 +88,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
+      { rel: "preconnect", href: "https://fonts.googleapis.com" },
+      { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
+      {
+        rel: "stylesheet",
+        href: "https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap",
+      },
       {
         rel: "stylesheet",
         href: appCss,
