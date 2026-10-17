@@ -416,3 +416,4 @@ footer{padding-block:var(--s5);font-size:13px;color:var(--ink-2)}
 .mapbox .maplibregl-ctrl-attrib{font-family:var(--font);font-size:11px}
 .tip,.scard,.idle,.jam,.mapctl{z-index:4}
 ::-webkit-scrollbar{width:10px;height:10px}::-webkit-scrollbar-thumb{background:var(--panel-2);border-radius:5px}::-webkit-scrollbar-track{background:transparent}
+.item .model{display:inline-block;font-size:12px;font-weight:600;color:var(--ink);background:var(--panel-2);padding:1px 6px;border-radius:2px;margin-right:6px;font-variant-numeric:tabular-nums}

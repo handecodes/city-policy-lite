@@ -147,7 +147,7 @@ export function CrashTest() {
     return {
       failed: String(result.verdict).startsWith("FAILS"),
       over: over.size,
-      fixes: fixes.length ? (fixesJam ? "both fixes gridlock" : `${fixes.length} fixes tried`) : "no fixes tried",
+      fixes: fixes.length ? (fixesJam ? (fixes.length === 2 ? "both fixes gridlock" : "every fix gridlocks") : `${fixes.length} fixes tried`) : "no fixes tried",
       sims: result.events.filter((e) => e.type === "simulation_finished").length,
       supported: result.hypotheses.filter((h) => h.status === "supported").length,
     };
@@ -381,7 +381,7 @@ export function CrashTest() {
             <p className="pnote">
               Verdicts are computed by code from the simulation results.{" "}
               {replay
-                ? "This sample used the rule-based stand-in planner; the live version uses NVIDIA Nemotron on Nebius Token Factory."
+                ? "In this recorded run, NVIDIA Nemotron on Nebius Token Factory chose each experiment."
                 : "The planner is NVIDIA Nemotron on Nebius Token Factory."}
             </p>
             <StepList events={result.events} onShow={showOnMap} />

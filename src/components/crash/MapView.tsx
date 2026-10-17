@@ -206,9 +206,12 @@ export function MapView({ experiment, hasResult, filterSite, threshold, selected
       el.append(dot, p);
       markers.current.push(new maplibre.Marker({ element: el, anchor: "center" }).setLngLat(at).addTo(m));
     }
-    const site = filterSite ? meta?.filter_sites?.[filterSite] : undefined;
+    // F12 means both filters at once.
+    const siteIds = filterSite === "F12" ? ["F1", "F2"] : filterSite ? [filterSite] : [];
+    for (const sid of siteIds) {
+    const site = meta?.filter_sites?.[sid];
     const siteAt = site ? anchors[site.street] : undefined;
-    if (siteAt) {
+    if (!siteAt) continue;
       const el = document.createElement("div");
       el.className = "filter-mark";
       el.title = "Street filter";

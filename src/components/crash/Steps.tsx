@@ -2,7 +2,14 @@ import type { ReactNode } from "react";
 import type { RunEvent, Hypothesis, EvidenceCard, Violation } from "@/lib/source";
 import { PHASE, SCENARIOS, fmt, lc } from "./model";
 
-type Item = { what: string; why?: string | undefined; res?: ReactNode; exp?: string | undefined };
+function modelBadge(e: RunEvent) {
+  const m = String(e["model"] ?? "");
+  const name = /ultra/i.test(m) ? "Nemotron 3 Ultra" : /super/i.test(m) ? "Nemotron 3 Super" : m.split("/").pop();
+  const s = typeof e["latency_s"] === "number" ? ` · ${e["latency_s"].toFixed(1)} s` : "";
+  return `${name}${s}`;
+}
+
+type Item = { what: string; why?: string | undefined; res?: ReactNode; exp?: string | undefined; model?: string | undefined };
 
 function itemsFor(phase: string, ev: RunEvent[]): Item[] {
   const out: Item[] = [];
@@ -29,6 +36,8 @@ function itemsFor(phase: string, ev: RunEvent[]): Item[] {
     const vs: Violation[] = rest.filter((x) => x.type === "violation_detected" && x.experiment_id === id).map((x) => x["violation"]);
     const rejected = rest.some((x) => x.type === "mitigation_rejected" && x.experiment_id === id);
     const sc = SCENARIOS.find((s) => s.id === id);
+    const call = [...ev.slice(0, i)].reverse().find((x) => x.type === "llm_call" || x.type === "decision");
+    const model = call?.type === "llm_call" ? modelBadge(call) : undefined;
     const res = (
       <>
         {vs.length ? (
@@ -51,7 +60,7 @@ function itemsFor(phase: string, ev: RunEvent[]): Item[] {
         {rejected && " Fix rejected."}
       </>
     );
-    out.push({ what: sc ? sc.t : id, why: e["decision"].rationale, res, exp: id });
+    out.push({ what: sc ? sc.t : id, why: e["decision"].rationale, res, exp: id, model });
   });
   if (phase === "report") out.push({ what: "Wrote the Policy Failure Report" });
   return out;
@@ -87,7 +96,7 @@ export function StepList({
             {itemsFor(ph.phase, ph.ev).map((it, i) => (
               <li className="item" key={i}>
                 <div className="what">{it.what}</div>
-                {it.why && <div className="why">{it.why}</div>}
+                {it.why && <div className="why">{it.model && <span className="model">{it.model}</span>}{it.why}</div>}
                 {it.res && <div className="res">{it.res}</div>}
                 {!compact && it.exp && onShow && SCENARIOS.some((s) => s.id === it.exp) && (
                   <button type="button" className="show" onClick={() => onShow(it.exp!)}>

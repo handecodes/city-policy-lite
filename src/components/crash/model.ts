@@ -6,6 +6,7 @@ export const SCENARIOS: Scenario[] = [
   { id: "quays:FC.M0.DN", t: "The closure", d: "Normal demand" },
   { id: "quays:FC.F2.DN", t: "With a filter on Rue de Brosse", d: "Fix tried by the agent", filter: "F2" },
   { id: "quays:FC.F1.DN", t: "With a filter on Rue François Miron", d: "Fix tried by the agent", filter: "F1" },
+  { id: "quays:FC.F12.DN", t: "With filters on both streets", d: "Fix tried by the agent", filter: "F12" },
   { id: "quays:FC.M0.DH", t: "At high demand", d: "15% more trips" },
   { id: "quays:FC.M0.DL", t: "At low demand", d: "15% fewer trips" },
 ];
