@@ -61,6 +61,23 @@ export type RunState = {
   evidence: EvidenceCard[];
   verdict: string;
   meta?: RunMeta;
+  scenario?: Scenario;
+};
+
+/** The case being crash-tested: a copy of the engine's scenario.json. */
+export type Scenario = {
+  id: string;
+  city: string;
+  area_name: string;
+  bbox: [number, number, number, number];
+  policy: { street: string; from: string; to: string; direction: string };
+  policy_label: string;
+  always_closed_to_cars: string[];
+  always_closed_reason?: string;
+  demand: { trips_per_hour: number; low: number; high: number };
+  checks: { G1_min_drop_pct: number; C1_min_pct: number; C1_min_cars_per_h: number; C2_min_pct: number; C2_min_vehh: number };
+  experiment_prefix: string;
+  evidence: EvidenceCard[];
 };
 
 export type RunMeta = {

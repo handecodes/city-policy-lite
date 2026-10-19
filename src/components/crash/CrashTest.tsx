@@ -9,13 +9,14 @@ import {
   type RunEvent,
   type RunMeta,
   type RunState,
+  type Scenario as Case,
   type EdgeCollection,
   type Subscription,
 } from "@/lib/source";
 import { MapView } from "./MapView";
 import { Plaque } from "./Plaque";
 import { EvidenceList, HypothesisList, StepList } from "./Steps";
-import { EMPTY, PHASE, SCENARIOS, chipFor, fmt } from "./model";
+import { EMPTY, PHASE, SCENARIOS, chipFor, configureScenarios, fmt } from "./model";
 
 type Phase = "setup" | "running" | "done";
 type Tab = "map" | "steps" | "hypotheses" | "limits";
@@ -36,6 +37,12 @@ export function CrashTest() {
   const [street, setStreet] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("map");
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [kase, setKase] = useState<Case | undefined>();
+  const [startedAt, setStartedAt] = useState(0);
+  const [now, setNow] = useState(0);
+  const failedLive = useRef<string | null>(null);
+  const [activeMode, setActiveMode] = useState<"replay" | "live">("replay");
 
   const source: DataSource = sourceMode === "live" && liveSource ? liveSource : ReplaySource;
   const sub = useRef<Subscription | null>(null);
@@ -54,6 +61,8 @@ export function CrashTest() {
     // Recorded run gives the map its label anchors before any run starts.
     loadRecorded().then((r) => {
       setMeta(r.meta);
+      if (r.scenario) setKase(r.scenario);
+      configureScenarios(r.scenario?.experiment_prefix, r.meta?.filter_sites, r.scenario?.demand);
       setTotalSims(r.events.filter((e) => e.type === "simulation_finished").length);
     }).catch(() => {});
     return () => sub.current?.cancel();
@@ -65,9 +74,22 @@ export function CrashTest() {
   const sc = SCENARIOS.find((s) => s.id === current);
   const simsDone = events.filter((e) => e.type === "simulation_finished").length;
 
-  const start = async (ev: React.FormEvent) => {
-    ev.preventDefault();
+  // Elapsed-seconds clock for live runs.
+  useEffect(() => {
+    if (phase !== "running") return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [phase]);
+
+  const start = async (ev?: React.FormEvent, from: DataSource = source) => {
+    ev?.preventDefault();
     setError(null);
+    failedLive.current = null;
+    setActiveMode(from.mode);
+    setStartedAt(Date.now());
+    setNow(Date.now());
+    if (from === ReplaySource) setNotice((n) => (n && n.startsWith("Live") ? n : null));
+    else setNotice(null);
     setEvents([]);
     setExperiments({});
     setCurrent(null);
@@ -77,35 +99,57 @@ export function CrashTest() {
     try {
       const area = presets?.recorded?.area ?? "paris-hdv";
       const policy = presets?.recorded?.policy ?? "quays:FC";
-      const id = await source.startRun({ area, policy, demand, budget });
+      const id = await from.startRun({ area, policy, demand, budget });
       runId.current = id;
-      sub.current = source.subscribe(id, onEvent, onDone);
+      const handlers = from === source ? [onEvent, onDone] as const : [makeOnEvent(from), makeOnDone(from)] as const;
+      sub.current = from.subscribe(id, handlers[0], handlers[1]);
     } catch (err) {
+      if (from.mode === "live") {
+        fallBack(err instanceof Error ? err.message : "the run could not start");
+        return;
+      }
       setError(err instanceof Error ? err.message : "The run could not start.");
       setPhase("setup");
     }
   };
 
-  const onEvent = useCallback(
-    (e: RunEvent) => {
-      setEvents((prev) => [...prev, e]);
-      if (e.type === "run_started" && e["budget"] && source.mode === "live") setTotalSims(e["budget"] + 1);
-      const id = e.experiment_id;
-      if (e.type === "simulation_finished" && id && !String(id).includes("BASE")) {
-        source.getExperiment(runId.current!, id).then((x) => {
-          if (!x || finished.current) return;
-          setExperiments((prev) => ({ ...prev, [id]: x }));
-          setCurrent(id);
-        });
-      }
-    },
-    [source],
-  );
+  // Live runs can fail (quota, outage). Show a short notice and play the recorded run instead.
+  const fallBack = (why: string) => {
+    sub.current?.cancel();
+    setNotice(`Live runs are unavailable right now (${why}). Showing the recorded run instead.`);
+    setEvents([]);
+    finished.current = false;
+    start(undefined, ReplaySource);
+  };
 
-  const onDone = useCallback(async () => {
+  const makeOnEvent = (from: DataSource) => (e: RunEvent) => {
+    if (e.type === "run_failed") {
+      failedLive.current = String(e["error"] ?? "the run failed");
+      return;
+    }
+    setEvents((prev) => [...prev, e]);
+    const id = e.experiment_id;
+    if (e.type === "simulation_finished" && id && !String(id).includes("BASE")) {
+      from.getExperiment(runId.current!, id).then((x) => {
+        if (!x || finished.current) return;
+        setExperiments((prev) => ({ ...prev, [id]: x }));
+        setCurrent(id);
+      });
+    }
+  };
+
+  const makeOnDone = (from: DataSource) => async () => {
+    if (failedLive.current) {
+      fallBack(failedLive.current);
+      return;
+    }
     finished.current = true;
     try {
-      const R = await source.getRun(runId.current!);
+      const R = await from.getRun(runId.current!);
+      if (R.scenario) {
+        setKase(R.scenario);
+        configureScenarios(R.scenario.experiment_prefix, R.meta?.filter_sites, R.scenario.demand);
+      }
       setResult(R);
       if (R.meta) setMeta(R.meta);
       setExperiments(R.experiments);
@@ -113,10 +157,15 @@ export function CrashTest() {
       setPhase("done");
       setTab("map");
     } catch (err) {
+      if (from.mode === "live") return fallBack(err instanceof Error ? err.message : "no results");
       setError(err instanceof Error ? err.message : "The results could not load.");
       setPhase("setup");
     }
-  }, [source]);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const onEvent = useCallback(makeOnEvent(source), [source]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const onDone = useCallback(makeOnDone(source), [source]);
 
   useEffect(() => {
     const el = feedRef.current;
@@ -173,8 +222,10 @@ export function CrashTest() {
       <header className="app">
         <div>
           <div className="brand">City Policy Crash-Test</div>
-          <h1>Quai de l'Hôtel de Ville closed to eastbound cars</h1>
-          <div className="meta">Rue de Brosse to Pont Louis-Philippe · Paris 4e · {fmt(presets?.demand.find((d) => d.id === demand)?.trips ?? 1200)} trips/h · 3 seeds</div>
+          <h1>{kase ? `${kase.policy.street} closed to ${kase.policy.direction} cars` : "Loading the case…"}</h1>
+          <div className="meta">
+            {kase ? `${kase.policy.from} to ${kase.policy.to} · ${kase.city}, ${kase.area_name} · ${fmt(kase.demand.trips_per_hour)} trips/h · 3 seeds` : "\u00a0"}
+          </div>
         </div>
         <div className="hright">
           <div className="vpill" role="status">
@@ -240,7 +291,7 @@ export function CrashTest() {
               </div>
               <div className="key">
                 <svg viewBox="0 0 34 10" aria-hidden="true"><line x1="1" y1="5" x2="33" y2="5" stroke="var(--ink-2)" strokeWidth="2" strokeDasharray="1.5 3" strokeLinecap="round" /></svg>
-                Rue de Rivoli, no through cars
+                {(kase?.always_closed_to_cars ?? ["Rue de Rivoli"]).join(", ")}, no through cars
               </div>
               <div className="thr" role="group" aria-label="Show changes of at least">
                 <span>Show changes from</span>
@@ -262,35 +313,12 @@ export function CrashTest() {
             {phase === "setup" && (
               <form className="setup" onSubmit={start} noValidate>
                 <h2 className="ph">Set up a crash-test</h2>
-                <label className="fld">
-                  Study area
-                  <select defaultValue={presets?.recorded?.area}>
-                    {presets?.areas.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                  </select>
-                </label>
-                <label className="fld">
-                  Policy
-                  <select defaultValue={presets?.recorded?.policy}>
-                    {presets?.policies.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                  </select>
-                </label>
-                <fieldset className="fld seg">
-                  <legend>Demand</legend>
-                  <div className="opts">
-                    {presets?.demand.map((d) => (
-                      <label key={d.id} title={`${fmt(d.trips)} car trips/h`}>
-                        <input type="radio" name="demand" value={d.id} checked={demand === d.id} disabled={replay} onChange={() => setDemand(d.id)} />
-                        <span>{d.name}</span>
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
-                <label className="fld">
-                  Simulation budget
-                  <select value={budget} disabled={replay} onChange={(e) => setBudget(+e.target.value)}>
-                    {presets?.budgets.map((b) => <option key={b} value={b}>{b} simulations</option>)}
-                  </select>
-                </label>
+                <dl className="case">
+                  <div><dt>Study area</dt><dd>{kase ? `${kase.city} · ${kase.area_name}` : "…"}</dd></div>
+                  <div><dt>Policy</dt><dd>{kase?.policy_label ?? "…"}</dd></div>
+                  <div><dt>Demand</dt><dd>Normal, {fmt(kase?.demand.trips_per_hour ?? 1200)} car trips/h. The agent also tests low and high demand.</dd></div>
+                  <div><dt>Simulation budget</dt><dd>6 simulations, 3 seeds each</dd></div>
+                </dl>
                 <fieldset className="fld seg">
                   <legend>Run from</legend>
                   <div className="opts">
@@ -306,19 +334,22 @@ export function CrashTest() {
                 </fieldset>
                 <p className="hint">
                   {replay
-                    ? "Plays back a recorded run of this policy at normal demand with 6 simulations. Live runs unlock when the backend is connected."
-                    : "Starts a new run on the backend with Nemotron on Nebius Token Factory."}
+                    ? liveSource
+                      ? "Plays back a recorded run, step by step. Pick Live agent to run SUMO and Nemotron for real."
+                      : "Plays back a recorded run, step by step. Live runs unlock when Lovable Cloud is connected."
+                    : "Starts a fresh run in a Nebius sandbox: SUMO simulates, Nemotron picks each experiment. Takes about 1.5 minutes."}
                 </p>
                 <div className="checks">
                   <span>The agent checks</span>
                   <ul>
-                    <li>Residential streets: over +30% and +100 cars/h</li>
-                    <li>Total delay: over +10% and +20 veh·h</li>
+                    <li>Residential streets: over +{kase?.checks.C1_min_pct ?? 30}% and +{kase?.checks.C1_min_cars_per_h ?? 100} cars/h</li>
+                    <li>Total delay: over +{kase?.checks.C2_min_pct ?? 10}% and +{kase?.checks.C2_min_vehh ?? 20} veh·h</li>
                     <li>Gridlock: stuck vehicles or unfinished trips</li>
                   </ul>
                 </div>
+                {notice && <p className="notice" role="status">{notice}</p>}
                 {error && <p className="err" role="alert">{error}</p>}
-                <button type="submit" className="run" disabled={!presets}>Run crash-test</button>
+                <button type="submit" className="run" disabled={!presets || !kase}>Run crash-test</button>
               </form>
             )}
 
@@ -326,10 +357,17 @@ export function CrashTest() {
               <div className="feed">
                 <div className="fhead">
                   <b>{PHASE[events[events.length - 1]?.phase ?? ""] ?? "Starting"}</b>
-                  <span className="num">{simsDone} of {totalSims || "…"} simulations</span>
-                  <button type="button" className="ghost" onClick={() => sub.current?.flush()}>Skip to results</button>
+                  <span className="num">
+                    {simsDone} of {totalSims || "…"} simulations
+                    {activeMode === "live" && ` · ${Math.max(0, Math.round((now - startedAt) / 1000))} s`}
+                  </span>
+                  {activeMode === "replay" && (
+                    <button type="button" className="ghost" onClick={() => sub.current?.flush()}>Skip to results</button>
+                  )}
                 </div>
-                <div className="pbar" aria-hidden="true"><i style={{ width: totalSims ? `${(simsDone / totalSims) * 100}%` : "0%" }} /></div>
+                <div className="pbar" aria-hidden="true"><i style={{ width: totalSims ? `${Math.min(100, (simsDone / totalSims) * 100)}%` : "0%" }} /></div>
+                {notice && <p className="notice" role="status">{notice}</p>}
+                {activeMode === "live" && events.length === 0 && <p className="hint">Starting a Nebius sandbox. The first steps show up after about 20 seconds.</p>}
                 {events.length === 0 ? (
                   <div className="feedskel" aria-hidden="true"><i /><i /><i /></div>
                 ) : (
@@ -393,16 +431,19 @@ export function CrashTest() {
             <div>
               <h3>Evidence</h3>
               <EvidenceList items={result.evidence} />
-              {replay && <p className="pnote">Hand-written stand-ins for this sample. The live version finds and quotes sources with Tavily.</p>}
+              <p className="pnote">Evidence cards come with the case file and are written by the team, not searched live.</p>
             </div>
             <div>
               <h3>Assumptions</h3>
               <ul className="list">
-                <li>Study area is a 1.3 × 1.1 km box around Hôtel de Ville, so longer detours are invisible.</li>
-                <li>Demand is synthetic, not yet calibrated to Paris traffic counts.</li>
-                <li>Rue de Rivoli is closed to through cars. Buses, taxis, bikes and pedestrians aren't simulated.</li>
+                <li>The study area is a small box around {kase?.area_name ?? "the closed street"}, so longer detours are invisible.</li>
+                <li>Demand is synthetic, not yet calibrated to {kase?.city ?? "local"} traffic counts.</li>
+                <li>
+                  {(kase?.always_closed_to_cars ?? ["Rue de Rivoli"]).join(", ")} {kase?.always_closed_to_cars.length === 1 ? "is" : "are"} closed to through cars
+                  {kase?.always_closed_reason ? ` (${kase.always_closed_reason})` : ""}. Buses, taxis, bikes and pedestrians aren't simulated.
+                </li>
                 <li>No traffic disappears: nobody switches to the metro or travels later.</li>
-                <li>Over the limit means more than +30% and +100 cars/h, in at least 2 of 3 seeds.</li>
+                <li>Over the limit means more than +{kase?.checks.C1_min_pct ?? 30}% and +{kase?.checks.C1_min_cars_per_h ?? 100} cars/h, in at least 2 of 3 seeds.</li>
               </ul>
             </div>
           </section>

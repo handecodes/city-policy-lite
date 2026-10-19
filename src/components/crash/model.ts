@@ -2,14 +2,24 @@ import type { Experiment } from "@/lib/source";
 
 export type Scenario = { id: string; t: string; d: string; filter?: string };
 
-export const SCENARIOS: Scenario[] = [
-  { id: "quays:FC.M0.DN", t: "The closure", d: "Normal demand" },
-  { id: "quays:FC.F2.DN", t: "With a filter on Rue de Brosse", d: "Fix tried by the agent", filter: "F2" },
-  { id: "quays:FC.F1.DN", t: "With a filter on Rue François Miron", d: "Fix tried by the agent", filter: "F1" },
-  { id: "quays:FC.F12.DN", t: "With filters on both streets", d: "Fix tried by the agent", filter: "F12" },
-  { id: "quays:FC.M0.DH", t: "At high demand", d: "15% more trips" },
-  { id: "quays:FC.M0.DL", t: "At low demand", d: "15% fewer trips" },
-];
+/** Scenario list for the current case. Filled by configureScenarios from the run's scenario and filter sites. */
+export const SCENARIOS: Scenario[] = [];
+
+export function configureScenarios(prefix = "quays", sites: Record<string, { street: string }> = {}, demand?: { low: number; high: number }) {
+  const s1 = sites["F1"]?.street ?? "the first detour street";
+  const s2 = sites["F2"]?.street ?? "the second detour street";
+  const pct = (x: number | undefined, d: number) => Math.round(Math.abs(1 - (x ?? d)) * 100);
+  const list: Scenario[] = [
+    { id: `${prefix}:FC.M0.DN`, t: "The closure", d: "Normal demand" },
+    { id: `${prefix}:FC.F2.DN`, t: `With a filter on ${s2}`, d: "Fix tried by the agent", filter: "F2" },
+    { id: `${prefix}:FC.F1.DN`, t: `With a filter on ${s1}`, d: "Fix tried by the agent", filter: "F1" },
+    { id: `${prefix}:FC.F12.DN`, t: "With filters on both streets", d: "Fix tried by the agent", filter: "F12" },
+    { id: `${prefix}:FC.M0.DH`, t: "At high demand", d: `${pct(demand?.high, 1.15)}% more trips` },
+    { id: `${prefix}:FC.M0.DL`, t: "At low demand", d: `${pct(demand?.low, 0.85)}% fewer trips` },
+  ];
+  SCENARIOS.splice(0, SCENARIOS.length, ...list);
+}
+configureScenarios();
 
 export const PHASE: Record<string, string> = {
   research: "Research",
